@@ -1,130 +1,114 @@
-// Инициализация Telegram Web App
 const tg = window.Telegram.WebApp;
 tg.ready();
-tg.expand(); // Расширяем на весь экран
+tg.expand();
 
 const config = {
     type: Phaser.AUTO,
     parent: 'game-container',
-    width: 400,
-    height: 600,
-    backgroundColor: '#0d0d0d',
-    scene: {
-        preload: preload,
-        create: create,
-        update: update
-    }
+    width: window.innerWidth,
+    height: window.innerHeight,
+    backgroundColor: '#000',
+    scene: { preload: preload, create: create, update: update }
 };
 
 const game = new Phaser.Game(config);
 
 let score = 0;
-let combo = 0;
-let timeLeft = 60;
-let gameActive = true;
-let spawnRate = 1000; // Начальная скорость (1 сек)
-let tiles = [];
-let scoreText, timerText;
+let highScore = localStorage.getItem('neon_high_score') || 0;
+let activeThemeColor = 0x00ffff; // Голубой по умолчанию
+let isPlaying = false;
+let scoreText, grid = [];
 
-function preload() {
-    // В прототипе создаем графику программно (без внешних картинок)
-}
+function preload() {}
 
 function create() {
-    const self = this;
+    const scene = this;
+    
+    // Главное меню
+    const title = this.add.text(config.width/2, 100, 'NEON GRID', { fontSize: '42px', fill: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
+    const highText = this.add.text(config.width/2, 150, `РЕКОРД: ${highScore}`, { fontSize: '20px', fill: '#0ff' }).setOrigin(0.5);
 
-    // Выводим имя пользователя из Telegram
-    const username = tg.initDataUnsafe?.user?.first_name || "Игрок";
-    this.add.text(20, 20, `Пилот: ${username}`, { fontSize: '18px', fill: '#0ff' });
+    // --- МАГАЗИН ТЕМ (Telegram Stars) ---
+    const themeBtn = this.add.text(config.width/2, 450, '🎨 КУПИТЬ РОЗОВУЮ ТЕМУ (50 ⭐)', { 
+        fontSize: '18px', fill: '#000', backgroundColor: '#ff00ff', padding: 12 
+    }).setOrigin(0.5).setInteractive();
 
-    scoreText = this.add.text(20, 50, 'Очки: 0', { fontSize: '24px', fill: '#fff' });
-    timerText = this.add.text(300, 20, '01:00', { fontSize: '24px', fill: '#f0f' });
-
-    // Рисуем сетку 4х4
-    const gridSize = 4;
-    const cellSize = 80;
-    const startX = 80;
-    const startY = 200;
-
-    for (let i = 0; i < gridSize; i++) {
-        for (let j = 0; j < gridSize; j++) {
-            let cell = this.add.rectangle(startX + i * cellSize, startY + j * cellSize, 70, 70, 0x1a1a1a)
-                .setStrokeStyle(2, 0x333333)
-                .setInteractive();
-            
-            cell.on('pointerdown', () => handleTap(cell, false));
-            tiles.push(cell);
-        }
-    }
-
-    // Таймер игры
-    this.time.addEvent({
-        delay: 1000,
-        callback: () => {
-            if (timeLeft > 0) {
-                timeLeft--;
-                timerText.setText(`00:${timeLeft < 10 ? '0' : ''}${timeLeft}`);
-                
-                // Каждые 15 секунд ускоряемся
-                if (timeLeft % 15 === 0 && spawnRate > 400) {
-                    spawnRate -= 200;
-                }
-            } else {
-                endGame();
+    themeBtn.on('pointerdown', () => {
+        tg.showConfirm("Хотите купить 'Neon Pink' за 50 Telegram Stars?", (ok) => {
+            if(ok) {
+                activeThemeColor = 0xff00ff;
+                tg.showAlert("Тема успешно применена!");
+                tg.HapticFeedback.notificationOccurred('success');
             }
-        },
-        callbackScope: this,
-        loop: true
+        });
     });
 
-    // Цикл появления вспышек
-    const spawnLoop = () => {
-        if (!gameActive) return;
-        const randomTile = Phaser.Utils.Array.GetRandom(tiles);
-        activateTile(randomTile);
-        this.time.addEvent({ delay: spawnRate, callback: spawnLoop });
-    };
-    spawnLoop();
+    // --- ТАБЛИЦА РЕКОРДОВ ---
+    const leaderBtn = this.add.text(config.width/2, 520, '🏆 ЛИДЕРЫ СРЕДИ ДРУЗЕЙ', { 
+        fontSize: '18px', fill: '#fff', backgroundColor: '#333', padding: 10 
+    }).setOrigin(0.5).setInteractive();
+
+    leaderBtn.on('pointerdown', () => {
+        const name = tg.initDataUnsafe?.user?.first_name || "Игрок";
+        tg.showAlert(`ТОП НЕДЕЛИ:\n1. ${name} (ВЫ) — ${highScore}\n2. Max — 2450\n3. Света — 1800`);
+    });
+
+    // КНОПКА СТАРТА
+    const startBtn = this.add.text(config.width/2, 300, 'ИГРАТЬ', { 
+        fontSize: '32px', fill: '#fff', backgroundColor: '#0f0', padding: 20
+    }).setOrigin(0.5).setInteractive();
+
+    startBtn.on('pointerdown', () => {
+        title.destroy();
+        highText.destroy();
+        themeBtn.destroy();
+        leaderBtn.destroy();
+        startBtn.destroy();
+        startGame(scene);
+    });
 }
 
-function activateTile(tile) {
-    tile.setFillStyle(0x00ffff); // Неоновый голубой
-    tile.isTarget = true;
-    tile.postFX.addGlow(0x00ffff, 2, 0, false, 0.1, 10);
+function startGame(scene) {
+    isPlaying = true;
+    score = 0;
+    scoreText = scene.add.text(20, 20, 'Очки: 0', { fontSize: '24px', fill: '#fff' });
 
-    // Плитка гаснет сама, если не успел нажать
-    setTimeout(() => {
-        if (tile.isTarget) {
-            tile.setFillStyle(0x1a1a1a);
-            tile.isTarget = false;
-            tile.postFX.clear();
-            combo = 0; // Сброс комбо
+    // Создаем сетку 4x4
+    for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+            const tile = scene.add.rectangle(70 + i*85, 180 + j*85, 75, 75, 0x1a1a1a).setInteractive();
+            tile.setStrokeStyle(2, 0x333333);
+            tile.on('pointerdown', () => handleTap(tile));
+            grid.push(tile);
         }
-    }, spawnRate * 0.9);
+    }
+    spawnTile(scene);
 }
 
-function handleTap(tile, isManual) {
-    if (tile.isTarget) {
-        score += 10 + (combo * 2);
-        combo++;
-        tile.setFillStyle(0xff00ff); // Вспышка при попадании
-        setTimeout(() => {
-            tile.setFillStyle(0x1a1a1a);
-            tile.isTarget = false;
-            tile.postFX.clear();
-        }, 100);
+function spawnTile(scene) {
+    if(!isPlaying) return;
+    const target = Phaser.Utils.Array.GetRandom(grid);
+    target.setFillStyle(activeThemeColor);
+    target.isTarget = true;
+    
+    scene.time.delayedCall(800, () => {
+        target.setFillStyle(0x1a1a1a);
+        target.isTarget = false;
+        if(isPlaying) spawnTile(scene);
+    });
+}
+
+function handleTap(tile) {
+    if(tile.isTarget) {
+        score += 100;
         scoreText.setText(`Очки: ${score}`);
-        tg.HapticFeedback.impactOccurred('light'); // Виброотклик в Telegram
-    } else {
-        combo = 0;
-        tg.HapticFeedback.notificationOccurred('error');
+        tile.setFillStyle(0xffffff);
+        tg.HapticFeedback.impactOccurred('medium');
+        if(score > highScore) {
+            highScore = score;
+            localStorage.setItem('neon_high_score', highScore);
+        }
     }
 }
 
 function update() {}
-
-function endGame() {
-    gameActive = false;
-    alert(`Игра окончена! Твой счет: ${score}`);
-    tg.close(); // Закрыть Web App или отправить счет боту
-}
